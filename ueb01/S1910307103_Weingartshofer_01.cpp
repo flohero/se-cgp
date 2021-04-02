@@ -577,8 +577,6 @@ void render_portable_objects() {
         (po.location().x - ctx.cam().x >= 0.1
          || po.location().z - ctx.cam().z >= 0.1)) {
       new_objects.push_back(po);
-    } else {
-      std::cout << "Despawned object" << std::endl;
     }
   }
   portable_objects = new_objects;
