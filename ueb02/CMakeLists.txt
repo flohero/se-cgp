@@ -4,7 +4,7 @@ project(ueb02)
 set(CMAKE_CXX_STANDARD 14)
 
 add_executable(ueb02
-        main.cpp)
+        S1910307103_Weingartshofer_02.cpp)
 
 find_package(GLEW REQUIRED)
 find_package(GLUT REQUIRED)
