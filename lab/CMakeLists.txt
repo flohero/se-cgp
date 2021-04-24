@@ -4,7 +4,7 @@ project(Lab)
 set(CMAKE_CXX_STANDARD 14)
 
 add_executable(Lab
-        lab2.cpp)
+        lab3.cpp)
 
 find_package(GLEW REQUIRED)
 find_package(GLUT REQUIRED)
