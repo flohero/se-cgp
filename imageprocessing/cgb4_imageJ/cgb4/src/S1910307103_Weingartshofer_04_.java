@@ -34,7 +34,6 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
 
     private State state;
 
-
     @Override
     public int setup(String s, ImagePlus imagePlus) {
         return DOES_8G + DOES_STACKS + SUPPORTS_MASKING;
@@ -56,7 +55,7 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
             return;
         }
 
-        Optional<Mode> opMode = showModeDialog();
+        Optional<PathFindingMode> opMode = showModeDialog();
         if (opMode.isEmpty()) {
             return;
         }
@@ -64,34 +63,68 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
 
         // **** Distance Map Without Safety Distance
         var distanceMapWithoutSafetyDistance = createDistanceMap(originalImage, Target.End);
-        displayDistanceMap(distanceMapWithoutSafetyDistance);
-
-        double[][] scaledDistanceMapWithoutSafetyDistance = scaleDistanceMap(distanceMapWithoutSafetyDistance);
-        ImageJUtility.showNewImage(scaledDistanceMapWithoutSafetyDistance, width, height, "Scaled Distance Map");
-
+        var scaledDistanceMapWithoutSafetyDistance = scaleDistanceMap(distanceMapWithoutSafetyDistance);
         var shortestPathWithoutSafetyDistance = calculateShortestPath(originalImage, distanceMapWithoutSafetyDistance);
+        var shortestPathWithoutSafetyDistanceImage = drawPathInImage(originalImage, (List<Tuple<Integer, Integer>>) shortestPathWithoutSafetyDistance);
 
-        int[][] shortestPathWithoutSafetyDistanceImage = cloneImage(originalImage);
-        for (var path : shortestPathWithoutSafetyDistance) {
-            shortestPathWithoutSafetyDistanceImage[path.x][path.y] = PATH;
+        // ***** Obstacle Map
+        var obstacleDistanceMap = createDistanceMap(originalImage, Target.Obstacles);
+        var obstacleDistanceMapScaled = scaleDistanceMap(obstacleDistanceMap);
+
+        // ***** Distance Map With Safety Distance
+        var distanceMapWithSafety = createDistanceMapWithSafetyDistance(originalImage, obstacleDistanceMap);
+        var shortestPathWithSafety = calculateShortestPath(originalImage, distanceMapWithSafety);
+
+        var shortestPathWithSafetyImage = drawPathInImage(originalImage, shortestPathWithSafety);
+
+        // ***** Draw Images
+        GenericDialog showEverythingDialog = new GenericDialog("Show Everything?");
+        showEverythingDialog.addCheckbox("Show Everything??", false);
+        showEverythingDialog.showDialog();
+        boolean showEverything = !showEverythingDialog.wasCanceled() && showEverythingDialog.getNextBoolean();
+
+        if (showEverything) {
+            normalizeDistanceMapAndDisplay(distanceMapWithoutSafetyDistance);
+            ImageJUtility.showNewImage(scaledDistanceMapWithoutSafetyDistance, width, height, "Scaled Distance Map");
         }
 
         ImageJUtility.showNewImage(shortestPathWithoutSafetyDistanceImage, width, height, "Image Without Safety Distance");
         WindowManager.setTempCurrentImage(WindowManager.getImage("Image Without Safety Distance"));
         IJ.run("mazeLUT");
 
-        // ***** Obstacle Map
-        double[][] obstacleDistanceMap = createDistanceMap(originalImage, Target.Obstacles);
-        double[][] obstacleDistanceMapScaled = scaleDistanceMap(obstacleDistanceMap);
-        ImageJUtility.showNewImage(obstacleDistanceMapScaled, state.getWidth(), state.getHeight(), "Obstacle Distance Map Scaled");
+        if (showEverything) {
+            ImageJUtility.showNewImage(obstacleDistanceMapScaled, state.getWidth(), state.getHeight(), "Obstacle Distance Map Scaled");
+        }
 
-        // ***** Distance Map With Safety Distance
-
-
+        ImageJUtility.showNewImage(shortestPathWithSafetyImage, width, height, "Image With Safety Distance");
+        WindowManager.setTempCurrentImage(WindowManager.getImage("Image With Safety Distance"));
+        IJ.run("mazeLUT");
     }
 
-    private Vector<Tuple<Integer, Integer>> calculateShortestPath(int[][] originalImage, double[][] distanceMap) {
-        Vector<Tuple<Integer, Integer>> shortestPath = new Vector<>();
+    /**
+     * Draws the path into the image. Does not change originalImage
+     *
+     * @param originalImage the original image
+     * @param path          the relevant pixels for the path
+     * @return the image with path
+     */
+    private int[][] drawPathInImage(int[][] originalImage, List<Tuple<Integer, Integer>> path) {
+        int[][] clonedOriginal = cloneImage(originalImage);
+        for (var point : path) {
+            clonedOriginal[point.x][point.y] = PATH;
+        }
+        return clonedOriginal;
+    }
+
+    /**
+     * Calculates the shortest path from the start point to end point
+     *
+     * @param originalImage used to find start and end point
+     * @param distanceMap   used to find the path between start and end point
+     * @return the relevant pixels of the path
+     */
+    private List<Tuple<Integer, Integer>> calculateShortestPath(int[][] originalImage, double[][] distanceMap) {
+        List<Tuple<Integer, Integer>> shortestPath = new ArrayList<>();
 
         List<Tuple<Integer, Integer>> startCoordinates = new ArrayList<>();
 
@@ -116,6 +149,8 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
         }
 
         shortestPath.add(start);
+
+        // The remaining distance to the end point
         double remainingDistance = Double.POSITIVE_INFINITY;
         while (remainingDistance > 0) {
             var neighbours = neighborsOfPixel(start, distanceMap);
@@ -123,6 +158,7 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
             var prevMinDistance = Double.POSITIVE_INFINITY;
             var bestNeighbour = Tuple.of(0, 0);
 
+            // Find next neighbour with smallest distance
             for (var neighbour : neighbours) {
                 double currentMoveCost = distanceToNeighbour(start, neighbour);
                 final double neighbourDistance = distanceMap[neighbour.x][neighbour.y];
@@ -141,11 +177,15 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
         return shortestPath;
     }
 
+    /**
+     * Scales the distance map so there are negative or infinity values
+     *
+     * @param distanceMap to be scaled
+     * @return a new distanceMap with scaled values
+     */
     private double[][] scaleDistanceMap(double[][] distanceMap) {
         var scaledDistanceMap = new double[state.getWidth()][state.getHeight()];
-
-        double maxValue = Double.NEGATIVE_INFINITY;
-        maxValue = getMaxValueWithoutInfinity(distanceMap, maxValue);
+        var maxValue = getMaxValueWithoutInfinity(distanceMap);
 
         for (int x = 0; x < state.getWidth(); x++) {
             for (int y = 0; y < state.getHeight(); y++) {
@@ -162,7 +202,14 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
         return scaledDistanceMap;
     }
 
-    private double getMaxValueWithoutInfinity(double[][] distanceMap, double maxValue) {
+    /**
+     * Finds the greatest value in a distance map excluding Infinity
+     *
+     * @param distanceMap contains the greatest value
+     * @return the greatest value
+     */
+    private double getMaxValueWithoutInfinity(double[][] distanceMap) {
+        double maxValue = Double.NEGATIVE_INFINITY;
         for (int x = 0; x < state.getWidth(); x++) {
             for (int y = 0; y < state.getHeight(); y++) {
                 if (distanceMap[x][y] > maxValue && distanceMap[x][y] != Double.POSITIVE_INFINITY) {
@@ -173,7 +220,13 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
         return maxValue;
     }
 
-    private void displayDistanceMap(double[][] distanceMap) {
+    /**
+     * Normalize a distance map, which has not been scaled
+     * Mostly used for debugging
+     *
+     * @param distanceMap unscaled distance map
+     */
+    private void normalizeDistanceMapAndDisplay(double[][] distanceMap) {
         var displayMap = new double[state.getWidth()][state.getHeight()];
         for (int x = 0; x < state.getWidth(); x++) {
             for (int y = 0; y < state.getHeight(); y++) {
@@ -190,12 +243,23 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
         ImageJUtility.showNewImage(displayMap, state.getWidth(), state.getHeight(), "Distance Map Unscaled");
     }
 
+    /**
+     * Utility to show errors to the user
+     *
+     * @param message
+     */
     private void showErrorDialog(String message) {
         GenericDialog errorDialog = new GenericDialog("ERROR");
         errorDialog.addMessage(message);
         errorDialog.showDialog();
     }
 
+    /**
+     * Checks that an image only contains th predefined values
+     *
+     * @param originalImage maze to check
+     * @return if the maze is valid
+     */
     private boolean isValidMaze(int[][] originalImage) {
         for (int x = 0; x < state.getWidth(); x++) {
             for (int y = 0; y < state.getHeight(); y++) {
@@ -209,8 +273,14 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
         return true;
     }
 
-    private Optional<Mode> showModeDialog() {
-        String[] modes = Arrays.stream(Mode.class.getEnumConstants())
+    /**
+     * Asks the user what path finding mode should be used
+     *
+     * @return a path finding mode if one was selected
+     */
+    private Optional<PathFindingMode> showModeDialog() {
+        // Convert an enum to a string array
+        String[] modes = Arrays.stream(PathFindingMode.class.getEnumConstants())
                 .map(Enum::name)
                 .toArray(String[]::new);
         GenericDialog gd = new GenericDialog("Choose a mode: ");
@@ -220,39 +290,41 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
             return Optional.empty();
         }
         String modeStr = gd.getNextChoice();
-        return Optional.of(Mode.valueOf(modeStr));
+        return Optional.of(PathFindingMode.valueOf(modeStr));
     }
 
+    /**
+     * Creates the distance map of an image
+     *
+     * @param originalImage the original image
+     * @param target        if the distance map should target the end or obstacles
+     * @return a new distance map
+     */
     private double[][] createDistanceMap(int[][] originalImage, Target target) {
         var distanceMap = new double[state.getWidth()][state.getHeight()];
-        Queue<Tuple<Integer, Integer>> pixelsOfInterest = new ArrayDeque<>();
+        Queue<Tuple<Integer, Integer>> pixelsOfInterest = new LinkedList<>();
 
+        // Set Inaccessible pixels and target pixels
+        // everything else is infinity
+        // add the relevant pixels to a queue
         for (int x = 0; x < state.getWidth(); x++) {
             for (int y = 0; y < state.getHeight(); y++) {
-
-                // For the End Target Map
-                if (target == Target.End) {
-                    if (originalImage[x][y] == END) {
-                        distanceMap[x][y] = 0;
-                        pixelsOfInterest.add(Tuple.of(x, y));
-                    } else if (originalImage[x][y] == WALL || originalImage[x][y] == OBSTACLE) {
-                        distanceMap[x][y] = INACCESSIBLE;
-                    } else {
-                        distanceMap[x][y] = Double.POSITIVE_INFINITY;
-                    }
-                } else { // For the Obstacle Map
-                    if (originalImage[x][y] == OBSTACLE) {
-                        distanceMap[x][y] = 0;
-                        pixelsOfInterest.add(Tuple.of(x, y));
-                    } else if (originalImage[x][y] == WALL) {
-                        distanceMap[x][y] = INACCESSIBLE;
-                    } else {
-                        distanceMap[x][y] = Double.POSITIVE_INFINITY;
-                    }
+                var targetIntensity = target == Target.End ? END : OBSTACLE;
+                if (originalImage[x][y] == targetIntensity) {
+                    distanceMap[x][y] = 0;
+                    pixelsOfInterest.add(Tuple.of(x, y));
+                } else if (originalImage[x][y] == WALL
+                        || (target == Target.End && originalImage[x][y] == OBSTACLE)) {
+                    distanceMap[x][y] = INACCESSIBLE;
+                } else {
+                    distanceMap[x][y] = Double.POSITIVE_INFINITY;
                 }
             }
         }
 
+
+        // Iterate over all relevant pixels and calculate the values of their neighbours
+        // If a neighbour is also relevant it will be added to the queue
         while (!pixelsOfInterest.isEmpty()) {
             Tuple<Integer, Integer> tuple = pixelsOfInterest.poll();
             var neighbours = neighborsOfPixel(tuple, distanceMap);
@@ -271,7 +343,6 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
 
                 final double ownValue = distanceMap[tuple.x][tuple.y];
                 if (distanceMap[neighbour.x][neighbour.y] > ownValue + distanceToNeighbor) {
-
                     distanceMap[neighbour.x][neighbour.y] = ownValue + distanceToNeighbor;
                     if (!pixelsOfInterest.contains(neighbour)) {
                         pixelsOfInterest.add(neighbour);
@@ -282,25 +353,61 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
         return distanceMap;
     }
 
-    private double distanceToNeighbour(Tuple<Integer, Integer> tuple, Tuple<Integer, Integer> neighbour) {
+    /**
+     * Create a distance map but with an safety distance to obstacles
+     *
+     * @param originalImage the original image
+     * @param obstacleMap   the distance map of the obstacles
+     * @return a distance map with safety distance
+     */
+    private double[][] createDistanceMapWithSafetyDistance(int[][] originalImage, double[][] obstacleMap) {
+        int[][] imageWithObstacles = cloneImage(originalImage);
+        for (int x = 0; x < state.getWidth(); x++) {
+            for (int y = 0; y < state.getHeight(); y++) {
+                if (obstacleMap[x][y] <= SAFETY_DISTANCE) {
+                    imageWithObstacles[x][y] = WALL;
+                }
+            }
+        }
+
+        return createDistanceMap(imageWithObstacles, Target.End);
+    }
+
+    /**
+     * Calculate the distance to a neighbour
+     * The value of the distance is determined by the path finding mode
+     *
+     * @param pixel     the start pixel
+     * @param neighbour the neighbour of the pixel
+     * @return the distance to a neighbour
+     */
+    private double distanceToNeighbour(Tuple<Integer, Integer> pixel, Tuple<Integer, Integer> neighbour) {
         // vertical/horizontal is always one and for checkerboard diagonal is also one
-        if (tuple.x.equals(neighbour.x) || tuple.y.equals(neighbour.y) || state.getMode() == Mode.Checkerboard) {
+        if (pixel.x.equals(neighbour.x) || pixel.y.equals(neighbour.y)
+                || state.getMode() == PathFindingMode.Checkerboard) {
             return 1;
         }
-        if (state.getMode() == Mode.Euclid) {
+        if (state.getMode() == PathFindingMode.Euclid) {
             return Math.sqrt(2);
         }
         return Double.POSITIVE_INFINITY;
     }
 
-    private List<Tuple<Integer, Integer>> neighborsOfPixel(Tuple<Integer, Integer> tuple, double[][] distanceMap) {
+    /**
+     * Find all relevant neighbours of a pixel. Not relevant pixels are for example pixels with their value below zero
+     *
+     * @param coordinate  the coordinate of the pixel
+     * @param distanceMap the distance map to find the neigbours
+     * @return a list of relevant neighbours
+     */
+    private List<Tuple<Integer, Integer>> neighborsOfPixel(Tuple<Integer, Integer> coordinate, double[][] distanceMap) {
         List<Tuple<Integer, Integer>> neighbours = new ArrayList<>();
         for (int x = -1; x <= 1; x++) {
             for (int y = -1; y <= 1; y++) {
-                final var neighbour = Tuple.of(tuple.x + x, tuple.y + y);
+                final var neighbour = Tuple.of(coordinate.x + x, coordinate.y + y);
                 if (!isValidCoordinate(neighbour) // Outside of the image
-                        || (state.getMode() == Mode.Manhattan && (x != 0 && y != 0)) // For Manhattan diagnoal neighbours need to be excluded
-                        || (distanceMap[neighbour.x][neighbour.y] < 0.0)) {
+                        || (state.getMode() == PathFindingMode.Manhattan && (x != 0 && y != 0)) // For Manhattan diagonal neighbours need to be excluded
+                        || (distanceMap[neighbour.x][neighbour.y] < 0)) { // could be a wall or obstacle
                     continue;
                 }
                 neighbours.add(neighbour);
@@ -309,6 +416,12 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
         return neighbours;
     }
 
+    /**
+     * Check if a tuple is a valid coordinate in the image
+     *
+     * @param coordinate coordinate which is checked
+     * @return if the coordinate is valid
+     */
     private boolean isValidCoordinate(Tuple<Integer, Integer> coordinate) {
         return coordinate.x >= 0
                 && coordinate.y >= 0
@@ -316,6 +429,12 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
                 && coordinate.y < state.getHeight();
     }
 
+    /**
+     * Deep clones an image
+     *
+     * @param arr the image to be cloned
+     * @return a new image
+     */
     private int[][] cloneImage(int[][] arr) {
         var newImage = new int[state.getWidth()][state.getHeight()];
         for (int i = 0; i < state.getWidth(); i++) {
@@ -324,10 +443,14 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
         return newImage;
     }
 
+    /**
+     * Holds the state of the Plugin:
+     * Image Width, Height and the path finding mode
+     */
     static class State {
         private final int width;
         private final int height;
-        private Mode mode;
+        private PathFindingMode pathFindingMode;
 
         State(int width, int height) {
             this.width = width;
@@ -342,15 +465,22 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
             return height;
         }
 
-        public Mode getMode() {
-            return mode;
+        public PathFindingMode getMode() {
+            return pathFindingMode;
         }
 
-        public void setMode(Mode mode) {
-            this.mode = mode;
+        public void setMode(PathFindingMode pathFindingMode) {
+            this.pathFindingMode = pathFindingMode;
         }
     }
 
+    /**
+     * Utility class to hold two generic values
+     * Used as 2D Coordinate
+     *
+     * @param <X>
+     * @param <Y>
+     */
     static class Tuple<X, Y> {
         private final X x;
         private final Y y;
@@ -372,10 +502,16 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
         }
     }
 
-    enum Mode {
+    /**
+     * The path finding mode
+     */
+    enum PathFindingMode {
         Checkerboard, Euclid, Manhattan
     }
 
+    /**
+     * Defines which object the distanceMap Algorithm has to target
+     */
     enum Target {
         End, Obstacles
     }
