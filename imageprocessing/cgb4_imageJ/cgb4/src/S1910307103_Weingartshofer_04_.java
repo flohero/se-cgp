@@ -1,8 +1,8 @@
 /*
 Title:      CGB Exercise 04
 Author:     Florian Weingartshofer
-Date:       25.05.2021
-Time spent: TODO
+Date:       04.06.2021
+Time spent: 7h
 Notes:      Requires mazeLUT.lut and Java 11
 */
 
@@ -61,10 +61,12 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
         }
         state.setMode(opMode.get());
 
+
         // **** Distance Map Without Safety Distance
         var distanceMapWithoutSafetyDistance = createDistanceMap(originalImage, Target.End);
         var scaledDistanceMapWithoutSafetyDistance = scaleDistanceMap(distanceMapWithoutSafetyDistance);
         var shortestPathWithoutSafetyDistance = calculateShortestPath(originalImage, distanceMapWithoutSafetyDistance);
+        System.out.println("Path length without Safety Distance: " + shortestPathWithoutSafetyDistance.size());
         var shortestPathWithoutSafetyDistanceImage = drawPathInImage(originalImage, (List<Tuple<Integer, Integer>>) shortestPathWithoutSafetyDistance);
 
         // ***** Obstacle Map
@@ -74,6 +76,8 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
         // ***** Distance Map With Safety Distance
         var distanceMapWithSafety = createDistanceMapWithSafetyDistance(originalImage, obstacleDistanceMap);
         var shortestPathWithSafety = calculateShortestPath(originalImage, distanceMapWithSafety);
+        System.out.println("Path length with Safety Distance: " + shortestPathWithSafety.size());
+        System.out.println("Difference: " + (shortestPathWithSafety.size() - shortestPathWithoutSafetyDistance.size()));
 
         var shortestPathWithSafetyImage = drawPathInImage(originalImage, shortestPathWithSafety);
 
@@ -123,8 +127,8 @@ public class S1910307103_Weingartshofer_04_ implements PlugInFilter {
      * @param distanceMap   used to find the path between start and end point
      * @return the relevant pixels of the path
      */
-    private List<Tuple<Integer, Integer>> calculateShortestPath(int[][] originalImage, double[][] distanceMap) {
-        List<Tuple<Integer, Integer>> shortestPath = new ArrayList<>();
+    private Vector<Tuple<Integer, Integer>> calculateShortestPath(int[][] originalImage, double[][] distanceMap) {
+        Vector<Tuple<Integer, Integer>> shortestPath = new Vector<>();
 
         List<Tuple<Integer, Integer>> startCoordinates = new ArrayList<>();
 
